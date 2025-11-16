@@ -68,7 +68,12 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     )
 
 async def on_startup() -> None:
-    logger.info("Bot is starting up")
+    masked = (
+        (settings.telegram_bot_token[:6] + "…" + settings.telegram_bot_token[-4:])
+        if settings.telegram_bot_token
+        else "<none>"
+    )
+    logger.info("Bot is starting up (TOKEN loaded: %s)", masked)
 
 async def on_shutdown() -> None:
     logger.info("Bot is shutting down")
@@ -208,6 +213,7 @@ async def handle_message(message: types.Message) -> None:
 
 async def main() -> None:
     if not settings.telegram_bot_token:
+        logger.error("Env var TELEGRAM_BOT_TOKEN not found. Ensure it is set in deployment service variables.")
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
