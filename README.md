@@ -4,3 +4,4 @@
 
 - [Документация на Русском 🇷🇺](./README.ru.md)
 - [English Documentation 🇬🇧](./README.en.md)
+- [Ссылка на бота](https://t.me/alphacapillot_bot)
