@@ -237,7 +237,7 @@ class BackendClient:
         Отправляет сообщение на backend API и возвращает ответ.
         
         Args:
-            user_id: ID пользователя Telegram (будет использован как user_id для backend)
+            user_id: ID пользователя (backend user_id)
             message: Текст сообщения пользователя
             
         Returns:
@@ -245,7 +245,7 @@ class BackendClient:
         """
         url = f"{self.base_url}/api/chat/message"
         payload = {
-            "user_id": user_id,
+            "user_id": str(user_id),  # Backend ожидает строку
             "message": message,
         }
         
