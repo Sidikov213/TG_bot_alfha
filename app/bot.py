@@ -365,11 +365,13 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
             # Если пользователь не найден (404), создаем его через POST
             if not telegram_user:
                 logger.info("Telegram user %s not found, creating via POST", user_id)
+                # Создаем пользователя с минимальными данными (только telegram_user_id)
+                # Остальные данные опциональны и могут быть обновлены позже
                 telegram_user = await backend.create_or_get_telegram_user(
                     telegram_user_id=user_id,
-                    telegram_username=telegram_username,
-                    first_name=first_name,
-                    last_name=last_name
+                    telegram_username=None,
+                    first_name=None,
+                    last_name=None
                 )
             
             if telegram_user:
@@ -748,7 +750,7 @@ async def handle_message(message: types.Message) -> None:
     last_name = name_parts[1] if len(name_parts) > 1 else None
     
     # Обычная обработка сообщений
-    await _process_text(message.bot, message.chat.id, uid, message.text, telegram_username, first_name, last_name)
+    await _process_text(message.bot, message.chat.id, uid, message.text)
 
 async def main() -> None:
     if not settings.telegram_bot_token:
