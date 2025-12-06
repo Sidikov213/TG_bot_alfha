@@ -95,19 +95,23 @@ async def cmd_start(message: types.Message) -> None:
     first_name = name_parts[0] if name_parts else name
     last_name = name_parts[1] if len(name_parts) > 1 else None
     
-    # Создаем или получаем Telegram пользователя
-    telegram_user = await backend.create_or_get_telegram_user(
-        telegram_user_id=telegram_user_id,
-        telegram_username=telegram_username,
-        first_name=first_name,
-        last_name=last_name
-    )
+    # Сначала проверяем, существует ли Telegram пользователь через GET
+    telegram_user = await backend.get_telegram_user(telegram_user_id)
     
+    # Если пользователь не найден (404), создаем его через POST
     if not telegram_user:
-        await message.answer(
-            "❌ Ошибка при обращении к серверу. Пожалуйста, попробуйте позже."
+        telegram_user = await backend.create_or_get_telegram_user(
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            first_name=first_name,
+            last_name=last_name
         )
-        return
+        
+        if not telegram_user:
+            await message.answer(
+                "❌ Ошибка при создании пользователя. Пожалуйста, попробуйте позже."
+            )
+            return
     
     logger.debug("Telegram user from create_or_get: %s", telegram_user)
     
@@ -352,41 +356,56 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
     if user_storage.has_user(user_id):
         backend_user_id = user_storage.get_backend_user_id(user_id)
     
-    # Если нет в локальном хранилище, проверяем в backend
+    # Если нет в локальном хранилище, проверяем через GET, затем создаем через POST если нужно
     if not backend_user_id:
-        telegram_user = await backend.get_telegram_user(user_id)
-        if telegram_user:
-            logger.info("Telegram user response: %s", telegram_user)
-            # Пробуем разные варианты названий полей
-            backend_user_id = (
-                telegram_user.get("user_id") 
-                or telegram_user.get("backend_user_id")
-                or telegram_user.get("linked_user_id")
-            )
-            logger.info("Extracted backend_user_id: %s from telegram_user: %s", backend_user_id, telegram_user)
+        try:
+            # Сначала проверяем через GET, существует ли пользователь в таблице telegram_users
+            telegram_user = await backend.get_telegram_user(user_id)
             
-            # Если нашли в backend, сохраняем в локальное хранилище
-            if backend_user_id:
-                token = user_storage.get_token(user_id)
-                user_storage.set(
+            # Если пользователь не найден (404), создаем его через POST
+            if not telegram_user:
+                logger.info("Telegram user %s not found, creating via POST", user_id)
+                telegram_user = await backend.create_or_get_telegram_user(
                     telegram_user_id=user_id,
-                    backend_user_id=backend_user_id,
-                    token=token,  # Сохраняем токен, если есть
-                    telegram_username=telegram_user.get("telegram_username")
+                    telegram_username=telegram_username,
+                    first_name=first_name,
+                    last_name=last_name
                 )
+            
+            if telegram_user:
+                logger.info("Telegram user response: %s", telegram_user)
+                # Пробуем разные варианты названий полей
+                backend_user_id = (
+                    telegram_user.get("user_id") 
+                    or telegram_user.get("backend_user_id")
+                    or telegram_user.get("linked_user_id")
+                )
+                logger.info("Extracted backend_user_id: %s from telegram_user: %s", backend_user_id, telegram_user)
+                
+                # Если нашли в backend, сохраняем в локальное хранилище
+                if backend_user_id:
+                    token = user_storage.get_token(user_id)
+                    user_storage.set(
+                        telegram_user_id=user_id,
+                        backend_user_id=backend_user_id,
+                        token=token,  # Сохраняем токен, если есть
+                        telegram_username=telegram_user.get("telegram_username")
+                    )
+                else:
+                    # Telegram пользователь существует, но не связан с основным аккаунтом
+                    # Пробуем использовать telegram_user_id напрямую для отправки сообщений
+                    logger.info("Telegram user %s exists but not linked to backend account, using telegram_user_id directly", user_id)
+                    backend_user_id = user_id  # Используем telegram_user_id как user_id
+                    # Сохраняем в локальное хранилище для будущих запросов
+                    user_storage.set(
+                        telegram_user_id=user_id,
+                        backend_user_id=user_id,  # Временно используем telegram_user_id
+                        telegram_username=telegram_user.get("telegram_username")
+                    )
             else:
-                # Telegram пользователь существует, но не связан с основным аккаунтом
-                # Пробуем использовать telegram_user_id напрямую для отправки сообщений
-                logger.info("Telegram user %s exists but not linked to backend account, using telegram_user_id directly", user_id)
-                backend_user_id = user_id  # Используем telegram_user_id как user_id
-                # Сохраняем в локальное хранилище для будущих запросов
-                user_storage.set(
-                    telegram_user_id=user_id,
-                    backend_user_id=user_id,  # Временно используем telegram_user_id
-                    telegram_username=telegram_user.get("telegram_username")
-                )
-        else:
-            logger.warning("Telegram user %s not found in backend", user_id)
+                logger.warning("Failed to get/create Telegram user %s", user_id)
+        except Exception as e:
+            logger.exception("Error getting/creating Telegram user: %s", e)
     
     # Если все еще нет backend_user_id, пользователь не зарегистрирован
     if not backend_user_id:
@@ -668,6 +687,11 @@ async def handle_message(message: types.Message) -> None:
         return
     
     uid = message.from_user.id
+    telegram_username = message.from_user.username
+    name = message.from_user.full_name or ""
+    name_parts = name.split(" ", 1)
+    first_name = name_parts[0] if name_parts else None
+    last_name = name_parts[1] if len(name_parts) > 1 else None
     
     # Проверяем, ожидаем ли мы email для регистрации
     if uid in user_states and user_states[uid] == "waiting_email":
@@ -755,7 +779,7 @@ async def handle_message(message: types.Message) -> None:
         return
     
     # Обычная обработка сообщений
-    await _process_text(message.bot, message.chat.id, uid, message.text)
+    await _process_text(message.bot, message.chat.id, uid, message.text, telegram_username, first_name, last_name)
 
 async def main() -> None:
     if not settings.telegram_bot_token:
