@@ -630,13 +630,67 @@ async def on_callback(call: CallbackQuery) -> None:
             )
             return
         
-        # Запрашиваем email у пользователя
-        user_states[telegram_user_id] = "waiting_email"
-        await call.message.edit_text(
-            f"📧 Пожалуйста, введите ваш email адрес:\n\n"
-            f"Это будет использовано для создания аккаунта."
-        )
-        await call.answer()
+        # Автоматически генерируем email и регистрируем пользователя
+        await call.message.edit_text("⏳ Создаю аккаунт...")
+        
+        # Генерируем email автоматически
+        email = backend._generate_email(telegram_user_id, telegram_username)
+        password = backend._generate_password()
+        
+        try:
+            result = await backend.register(
+                email=email,
+                password=password,
+                business_type="other",
+                telegram_username=telegram_username,
+                full_name=name
+            )
+            
+            if result:
+                backend_user_id = result.get("user_id")
+                token = result.get("token")
+                
+                # Связываем Telegram пользователя с основным аккаунтом
+                link_result = await backend.link_telegram_user(telegram_user_id, backend_user_id)
+                
+                if not link_result:
+                    logger.warning("Failed to link telegram user %s to backend user %s", telegram_user_id, backend_user_id)
+                
+                # Сохраняем данные
+                user_storage.set(
+                    telegram_user_id=telegram_user_id,
+                    backend_user_id=backend_user_id,
+                    token=token,
+                    email=email,
+                    password=password,
+                    telegram_username=telegram_username
+                )
+                
+                await call.message.edit_text(
+                    f"✅ Аккаунт успешно создан!\n\n"
+                    f"Привет, {name}! 👋\n"
+                    f"Я AI-ассистент для бизнеса. Отправьте мне сообщение, чтобы начать.\n"
+                    f"/help для списка команд."
+                )
+                await call.answer("Регистрация успешна! ✅")
+            else:
+                await call.message.edit_text(
+                    "❌ Ошибка при создании аккаунта. Пожалуйста, попробуйте позже или используйте /start."
+                )
+                await call.answer("Ошибка регистрации", show_alert=True)
+        except Exception as e:
+            error_msg = str(e)
+            if "already exists" in error_msg.lower() or "exists" in error_msg.lower():
+                await call.message.edit_text(
+                    "❌ Пользователь с таким Telegram username уже существует.\n\n"
+                    "Пожалуйста, обратитесь в поддержку."
+                )
+            else:
+                logger.exception("Registration error: %s", e)
+                await call.message.edit_text(
+                    "❌ Ошибка при создании аккаунта. Пожалуйста, попробуйте позже."
+                )
+            await call.answer("Ошибка регистрации", show_alert=True)
         return
     
     if data == "register_cancel":
@@ -692,91 +746,6 @@ async def handle_message(message: types.Message) -> None:
     name_parts = name.split(" ", 1)
     first_name = name_parts[0] if name_parts else None
     last_name = name_parts[1] if len(name_parts) > 1 else None
-    
-    # Проверяем, ожидаем ли мы email для регистрации
-    if uid in user_states and user_states[uid] == "waiting_email":
-        # Валидируем email
-        email = message.text.strip()
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            await message.answer(
-                "❌ Неверный формат email. Пожалуйста, введите корректный email адрес.\n\n"
-                "Пример: user@example.com"
-            )
-            return
-        
-        # Проверяем, не занят ли email
-        try:
-            # Можно добавить проверку через backend API, если есть endpoint
-            # Пока просто продолжаем регистрацию
-            pass
-        except Exception as e:
-            logger.exception("Error checking email: %s", e)
-        
-        # Генерируем пароль и регистрируем
-        telegram_username = message.from_user.username
-        name = message.from_user.full_name or "Пользователь"
-        password = backend._generate_password()
-        
-        await message.answer("⏳ Создаю аккаунт...")
-        
-        try:
-            result = await backend.register(
-                email=email,
-                password=password,
-                business_type="other",
-                telegram_username=telegram_username,
-                full_name=name
-            )
-            
-            if result:
-                backend_user_id = result.get("user_id")
-                token = result.get("token")
-                
-                # Связываем Telegram пользователя с основным аккаунтом
-                link_result = await backend.link_telegram_user(uid, backend_user_id)
-                
-                if not link_result:
-                    logger.warning("Failed to link telegram user %s to backend user %s", uid, backend_user_id)
-                    # Продолжаем даже если связывание не удалось
-                
-                # Сохраняем данные
-                user_storage.set(
-                    telegram_user_id=uid,
-                    backend_user_id=backend_user_id,
-                    token=token,
-                    email=email,
-                    password=password,
-                    telegram_username=telegram_username
-                )
-                # Удаляем состояние ожидания
-                user_states.pop(uid, None)
-                
-                await message.answer(
-                    f"✅ Аккаунт успешно создан!\n\n"
-                    f"Привет, {name}! 👋\n"
-                    f"Я AI-ассистент для бизнеса. Отправьте мне сообщение, чтобы начать.\n"
-                    f"/help для списка команд.",
-                    reply_markup=main_keyboard(),
-                )
-            else:
-                await message.answer(
-                    "❌ Ошибка при создании аккаунта. Пожалуйста, попробуйте позже или используйте /start."
-                )
-                user_states.pop(uid, None)
-        except Exception as e:
-            error_msg = str(e)
-            if "already exists" in error_msg.lower() or "exists" in error_msg.lower():
-                await message.answer(
-                    "❌ Пользователь с таким email или Telegram username уже существует.\n\n"
-                    "Пожалуйста, используйте другой email или обратитесь в поддержку."
-                )
-            else:
-                logger.exception("Registration error: %s", e)
-                await message.answer(
-                    "❌ Ошибка при создании аккаунта. Пожалуйста, попробуйте позже."
-                )
-            user_states.pop(uid, None)
-        return
     
     # Обычная обработка сообщений
     await _process_text(message.bot, message.chat.id, uid, message.text, telegram_username, first_name, last_name)
