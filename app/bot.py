@@ -402,6 +402,7 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
 
     # Получаем текущий conversation_id
     conversation_id = user_storage.get_conversation_id(user_id)
+    logger.info("Sending message with conversation_id: %s (user_id: %s)", conversation_id, user_id)
     
     async with ChatActionSender.typing(bot=bot, chat_id=chat_id):
         try:
@@ -410,13 +411,42 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
                 await bot.send_message(chat_id, "Ошибка при обращении к серверу. Попробуйте позже.")
                 return
             
+            logger.info("Backend response: %s", reply_data)
+            
             # Проверяем, вернул ли backend conversation_id в ответе
             # (если это новый разговор, backend может вернуть его ID)
+            new_conversation_id = None
+            reply = None
+            
             if isinstance(reply_data, dict):
-                new_conversation_id = reply_data.get("conversation_id") or reply_data.get("id")
+                # Пробуем разные варианты названий полей для conversation_id
+                new_conversation_id = (
+                    reply_data.get("conversation_id") 
+                    or reply_data.get("conversationId")
+                    or reply_data.get("id")
+                    or reply_data.get("conversation_id")
+                )
+                
+                # Конвертируем в int, если это строка
+                if new_conversation_id is not None:
+                    try:
+                        new_conversation_id = int(new_conversation_id)
+                    except (ValueError, TypeError):
+                        logger.warning("Invalid conversation_id format: %s", new_conversation_id)
+                        new_conversation_id = None
+                
                 if new_conversation_id:
+                    logger.info("New conversation_id received: %s", new_conversation_id)
                     user_storage.set_conversation_id(user_id, new_conversation_id)
-                reply = reply_data.get("response") or reply_data.get("message") or reply_data.get("text")
+                
+                # Извлекаем текст ответа
+                reply = (
+                    reply_data.get("response") 
+                    or reply_data.get("message") 
+                    or reply_data.get("text")
+                    or reply_data.get("content")
+                    or reply_data.get("answer")
+                )
             else:
                 reply = reply_data
                 

@@ -270,7 +270,16 @@ class BackendClient:
         Returns:
             Список сообщений или None в случае ошибки
         """
+        # Убеждаемся, что conversation_id - это число
+        if not isinstance(conversation_id, int):
+            try:
+                conversation_id = int(conversation_id)
+            except (ValueError, TypeError):
+                logger.error("Invalid conversation_id: %s", conversation_id)
+                return None
+        
         url = f"{self.base_url}/api/chat/history/{conversation_id}"
+        logger.info("Fetching conversation history for conversation_id: %s", conversation_id)
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -306,7 +315,13 @@ class BackendClient:
             "message": message,
         }
         if conversation_id is not None:
-            payload["conversation_id"] = conversation_id
+            # Убеждаемся, что conversation_id - это число
+            try:
+                conv_id = int(conversation_id)
+                payload["conversation_id"] = conv_id
+                logger.info("Sending message with conversation_id: %s", conv_id)
+            except (ValueError, TypeError):
+                logger.warning("Invalid conversation_id format: %s, sending without it", conversation_id)
         
         try:
             async with httpx.AsyncClient(timeout=60) as client:
