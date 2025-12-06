@@ -135,7 +135,33 @@ After startup the bot will use long polling to receive updates. Open Telegram an
 
 ## Docker
 
-### Build and run container
+### Using Docker Compose (Recommended)
+
+1. Create `.env` file from `env.example` and fill in the values:
+   ```bash
+   cp env.example .env
+   ```
+
+2. Update `BACKEND_URL` in `.env`:
+   - If backend runs in Docker Compose: `BACKEND_URL=http://backend:3000`
+   - If backend runs on host machine: `BACKEND_URL=http://host.docker.internal:3000` (Windows/Mac) or `BACKEND_URL=http://172.17.0.1:3000` (Linux)
+
+3. Start the bot:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. View logs:
+   ```bash
+   docker-compose logs -f bot
+   ```
+
+5. Stop the bot:
+   ```bash
+   docker-compose down
+   ```
+
+### Using Docker directly
 
 ```bash
 docker build -t tg-ai-bot .

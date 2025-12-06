@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: tg-ai-bot
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - app-network
+    # Если backend запущен в отдельном контейнере, раскомментируйте depends_on
+    # depends_on:
+    #   - backend
+    # Для отладки можно раскомментировать volumes для live reload
+    # volumes:
+    #   - ./app:/app/app
+
+  # Раскомментируйте и настройте, если backend тоже запускается в Docker
+  # backend:
+  #   image: your-backend-image:latest
+  #   # или build:
+  #   # build: ../alpha_backend
+  #   container_name: alpha-backend
+  #   ports:
+  #     - "3000:3000"
+  #   env_file:
+  #     - ../alpha_backend/.env
+  #   networks:
+  #     - app-network
+  #   volumes:
+  #     - backend-data:/data
+
+networks:
+  app-network:
+    driver: bridge
+
+# Раскомментируйте, если используете volumes для backend
+# volumes:
+#   backend-data:
+
