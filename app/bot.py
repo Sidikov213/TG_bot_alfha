@@ -182,17 +182,151 @@ async def cmd_start(message: types.Message) -> None:
 
 async def cmd_help(message: types.Message) -> None:
     await message.answer(
-        "Commands:\n"
-        "/start - greeting\n"
-        "/help - this help\n"
-        "/clear - clear your conversation memory\n"
-        "/templates - open templates",
+        "Команды:\n"
+        "/start - приветствие\n"
+        "/help - эта справка\n"
+        "/conversations - список разговоров\n"
+        "/history - история текущего разговора\n"
+        "/clear - очистить память разговора\n"
+        "/templates - открыть шаблоны",
         reply_markup=main_keyboard(),
     )
 
+async def cmd_conversations(message: types.Message) -> None:
+    """Показывает список разговоров пользователя"""
+    if not message.from_user:
+        await message.answer("Ошибка: не удалось получить информацию о пользователе.")
+        return
+    
+    telegram_user_id = message.from_user.id
+    backend_user_id = user_storage.get_backend_user_id(telegram_user_id)
+    
+    if not backend_user_id:
+        # Пытаемся получить из backend
+        telegram_user = await backend.get_telegram_user(telegram_user_id)
+        if telegram_user:
+            backend_user_id = (
+                telegram_user.get("user_id") 
+                or telegram_user.get("backend_user_id")
+                or telegram_user.get("linked_user_id")
+            )
+    
+    if not backend_user_id:
+        await message.answer(
+            "❌ Вы не зарегистрированы. Пожалуйста, используйте /start для регистрации."
+        )
+        return
+    
+    await message.answer("⏳ Загружаю список разговоров...")
+    
+    conversations = await backend.get_conversations(backend_user_id)
+    
+    if conversations is None:
+        await message.answer("❌ Ошибка при получении списка разговоров.")
+        return
+    
+    if not conversations:
+        await message.answer(
+            "📭 У вас пока нет разговоров.\n\n"
+            "Начните новый разговор, отправив сообщение боту."
+        )
+        return
+    
+    # Создаем клавиатуру с разговорами
+    keyboard_rows = []
+    for conv in conversations:
+        conv_id = conv.get("id") or conv.get("conversation_id")
+        title = conv.get("title") or conv.get("name") or f"Разговор #{conv_id}"
+        # Ограничиваем длину названия для кнопки
+        button_text = title[:40] + "..." if len(title) > 40 else title
+        keyboard_rows.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"conv|{conv_id}"
+            )
+        ])
+    
+    # Добавляем кнопку "Новый разговор"
+    keyboard_rows.append([
+        InlineKeyboardButton(text="➕ Новый разговор", callback_data="conv|new")
+    ])
+    
+    await message.answer(
+        f"📋 Ваши разговоры ({len(conversations)}):\n\n"
+        f"Выберите разговор для просмотра или создания нового:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    )
+
+async def cmd_history(message: types.Message) -> None:
+    """Показывает историю текущего разговора"""
+    if not message.from_user:
+        await message.answer("Ошибка: не удалось получить информацию о пользователе.")
+        return
+    
+    telegram_user_id = message.from_user.id
+    conversation_id = user_storage.get_conversation_id(telegram_user_id)
+    
+    if not conversation_id:
+        await message.answer(
+            "❌ У вас нет активного разговора.\n\n"
+            "Используйте /conversations для выбора разговора или начните новый, отправив сообщение."
+        )
+        return
+    
+    await message.answer("⏳ Загружаю историю разговора...")
+    
+    history = await backend.get_conversation_history(conversation_id)
+    
+    if history is None:
+        await message.answer("❌ Ошибка при получении истории разговора.")
+        return
+    
+    if not history:
+        await message.answer("📭 История разговора пуста.")
+        return
+    
+    # Форматируем историю
+    history_text = "📜 История разговора:\n\n"
+    
+    # Получаем title разговора (если есть)
+    title = None
+    for msg in history:
+        if msg.get("title"):
+            title = msg.get("title")
+            break
+    
+    if title:
+        history_text += f"**{title}**\n\n"
+    
+    # Форматируем сообщения
+    for msg in history:
+        role = msg.get("role") or msg.get("name") or "user"
+        content = msg.get("content") or msg.get("message") or msg.get("text") or ""
+        
+        # Определяем имя отправителя
+        if role.lower() in ["user", "human"]:
+            name = "Вы"
+        elif role.lower() in ["assistant", "ai", "bot"]:
+            name = "Ассистент"
+        else:
+            name = role.capitalize()
+        
+        history_text += f"{name}:\n{content}\n\n"
+    
+    # Разбиваем на части, если сообщение слишком длинное
+    if len(history_text) > 4000:
+        # Отправляем частями
+        parts = [history_text[i:i+4000] for i in range(0, len(history_text), 4000)]
+        for part in parts:
+            await message.answer(part, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await message.answer(history_text, parse_mode=ParseMode.MARKDOWN)
+
 async def cmd_clear(message: types.Message) -> None:
-    # История теперь управляется на backend, поэтому просто подтверждаем
-    await message.answer("История разговора очищена на сервере.", reply_markup=main_keyboard())
+    # Очищаем текущий разговор (сбрасываем conversation_id)
+    if message.from_user:
+        user_storage.set_conversation_id(message.from_user.id, None)
+    await message.answer("✅ Текущий разговор сброшен. Новое сообщение начнет новый разговор.", reply_markup=main_keyboard())
 
 
 def _clean_markdown(text: str) -> str:
@@ -266,16 +400,34 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
         await bot.send_message(chat_id, "Превышен лимит запросов. Попробуйте позже.")
         return
 
+    # Получаем текущий conversation_id
+    conversation_id = user_storage.get_conversation_id(user_id)
+    
     async with ChatActionSender.typing(bot=bot, chat_id=chat_id):
         try:
-            reply = await backend.send_message(backend_user_id, text)
-            if reply is None:
+            reply_data = await backend.send_message(backend_user_id, text, conversation_id)
+            if reply_data is None:
                 await bot.send_message(chat_id, "Ошибка при обращении к серверу. Попробуйте позже.")
                 return
+            
+            # Проверяем, вернул ли backend conversation_id в ответе
+            # (если это новый разговор, backend может вернуть его ID)
+            if isinstance(reply_data, dict):
+                new_conversation_id = reply_data.get("conversation_id") or reply_data.get("id")
+                if new_conversation_id:
+                    user_storage.set_conversation_id(user_id, new_conversation_id)
+                reply = reply_data.get("response") or reply_data.get("message") or reply_data.get("text")
+            else:
+                reply = reply_data
+                
         except Exception as e:
             logger.exception("Backend call failed: %s", e)
             await bot.send_message(chat_id, "Ошибка сервера. Попробуйте позже.")
             return
+    
+    if not reply:
+        await bot.send_message(chat_id, "Ошибка: пустой ответ от сервера.")
+        return
     
     reply = _clean_markdown(reply)
     await bot.send_message(chat_id, reply, parse_mode=ParseMode.HTML)
@@ -318,6 +470,96 @@ async def open_templates(message: types.Message) -> None:
 
 async def on_callback(call: CallbackQuery) -> None:
     data = call.data or ""
+    
+    # Обработка выбора разговора
+    if data.startswith("conv|"):
+        if not call.from_user:
+            await call.answer("Ошибка: не удалось получить информацию о пользователе.", show_alert=True)
+            return
+        
+        _, conv_data = data.split("|", 1)
+        telegram_user_id = call.from_user.id
+        
+        if conv_data == "new":
+            # Создаем новый разговор (сбрасываем conversation_id)
+            user_storage.set_conversation_id(telegram_user_id, None)
+            await call.message.edit_text(
+                "✅ Новый разговор создан.\n\n"
+                "Отправьте сообщение, чтобы начать новый разговор."
+            )
+            await call.answer("Новый разговор создан")
+            return
+        
+        try:
+            conversation_id = int(conv_data)
+        except ValueError:
+            await call.answer("Ошибка: неверный ID разговора", show_alert=True)
+            return
+        
+        # Устанавливаем выбранный разговор как текущий
+        user_storage.set_conversation_id(telegram_user_id, conversation_id)
+        
+        # Загружаем и показываем историю разговора
+        await call.message.edit_text("⏳ Загружаю историю разговора...")
+        
+        history = await backend.get_conversation_history(conversation_id)
+        
+        if history is None:
+            await call.message.edit_text("❌ Ошибка при получении истории разговора.")
+            await call.answer("Ошибка", show_alert=True)
+            return
+        
+        if not history:
+            await call.message.edit_text(
+                "📭 История разговора пуста.\n\n"
+                "Отправьте сообщение, чтобы начать разговор."
+            )
+            await call.answer("Разговор выбран")
+            return
+        
+        # Форматируем историю
+        history_text = "📜 История разговора:\n\n"
+        
+        # Получаем title разговора (если есть)
+        title = None
+        for msg in history:
+            if msg.get("title"):
+                title = msg.get("title")
+                break
+        
+        if title:
+            history_text += f"**{title}**\n\n"
+        
+        # Форматируем сообщения
+        for msg in history:
+            role = msg.get("role") or msg.get("name") or "user"
+            content = msg.get("content") or msg.get("message") or msg.get("text") or ""
+            
+            # Определяем имя отправителя
+            if role.lower() in ["user", "human"]:
+                name = "Вы"
+            elif role.lower() in ["assistant", "ai", "bot"]:
+                name = "Ассистент"
+            else:
+                name = role.capitalize()
+            
+            history_text += f"{name}:\n{content}\n\n"
+        
+        # Разбиваем на части, если сообщение слишком длинное
+        if len(history_text) > 4000:
+            # Отправляем первую часть
+            first_part = history_text[:4000]
+            await call.message.edit_text(first_part, parse_mode=ParseMode.MARKDOWN)
+            # Остальные части отправляем отдельными сообщениями
+            remaining = history_text[4000:]
+            parts = [remaining[i:i+4000] for i in range(0, len(remaining), 4000)]
+            for part in parts:
+                await call.message.answer(part, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await call.message.edit_text(history_text, parse_mode=ParseMode.MARKDOWN)
+        
+        await call.answer("Разговор выбран")
+        return
     
     # Обработка регистрации
     if data == "register_confirm":
@@ -497,6 +739,8 @@ async def main() -> None:
 
     dp.message.register(cmd_start, Command("start"))
     dp.message.register(cmd_help, Command("help"))
+    dp.message.register(cmd_conversations, Command("conversations"))
+    dp.message.register(cmd_history, Command("history"))
     dp.message.register(cmd_clear, Command("clear"))
     dp.message.register(open_templates, Command("templates"))
     dp.message.register(open_templates, F.text == "Шаблоны")

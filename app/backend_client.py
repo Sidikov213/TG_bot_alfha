@@ -232,22 +232,81 @@ class BackendClient:
             logger.exception("Backend API call failed: %s", e)
             return None
 
-    async def send_message(self, user_id: int, message: str) -> Optional[str]:
+    async def get_conversations(self, user_id: int) -> Optional[list]:
+        """
+        Получает список разговоров для пользователя.
+        
+        Args:
+            user_id: ID пользователя (backend user_id)
+            
+        Returns:
+            Список разговоров или None в случае ошибки
+        """
+        url = f"{self.base_url}/api/chat/conversations/{user_id}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url, headers=self.headers)
+                r.raise_for_status()
+                data = r.json()
+                # Предполагаем, что ответ - массив или объект с полем conversations
+                if isinstance(data, list):
+                    return data
+                return data.get("conversations", []) if isinstance(data, dict) else []
+        except httpx.HTTPStatusError as e:
+            logger.error("Backend API error: %s - %s", e.response.status_code, e.response.text)
+            return None
+        except Exception as e:
+            logger.exception("Backend API call failed: %s", e)
+            return None
+
+    async def get_conversation_history(self, conversation_id: int) -> Optional[list]:
+        """
+        Получает историю разговора.
+        
+        Args:
+            conversation_id: ID разговора
+            
+        Returns:
+            Список сообщений или None в случае ошибки
+        """
+        url = f"{self.base_url}/api/chat/history/{conversation_id}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.get(url, headers=self.headers)
+                r.raise_for_status()
+                data = r.json()
+                # Предполагаем, что ответ - массив или объект с полем messages/history
+                if isinstance(data, list):
+                    return data
+                return data.get("messages", []) or data.get("history", []) if isinstance(data, dict) else []
+        except httpx.HTTPStatusError as e:
+            logger.error("Backend API error: %s - %s", e.response.status_code, e.response.text)
+            return None
+        except Exception as e:
+            logger.exception("Backend API call failed: %s", e)
+            return None
+
+    async def send_message(self, user_id: int, message: str, conversation_id: Optional[int] = None) -> Optional[Dict]:
         """
         Отправляет сообщение на backend API и возвращает ответ.
         
         Args:
             user_id: ID пользователя (backend user_id)
             message: Текст сообщения пользователя
+            conversation_id: ID разговора (опционально, для продолжения существующего разговора)
             
         Returns:
-            Ответ от AI или None в случае ошибки
+            Словарь с ответом (может содержать conversation_id) или None в случае ошибки
         """
         url = f"{self.base_url}/api/chat/message"
         payload = {
             "user_id": str(user_id),  # Backend ожидает строку
             "message": message,
         }
+        if conversation_id is not None:
+            payload["conversation_id"] = conversation_id
         
         try:
             async with httpx.AsyncClient(timeout=60) as client:
@@ -257,6 +316,9 @@ class BackendClient:
                 # Пробуем разные варианты формата ответа
                 # Если ответ - строка напрямую, возвращаем её
                 if isinstance(data, str):
+                    return data
+                # Если это словарь, возвращаем весь объект (может содержать conversation_id)
+                if isinstance(data, dict):
                     return data
                 # Иначе ищем в полях response, message, text, content
                 return (
