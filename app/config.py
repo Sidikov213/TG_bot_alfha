@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    backend_url: str = Field(default="http://localhost:3000", alias="BACKEND_URL")
+    # Старые настройки AI (оставлены для обратной совместимости, но не используются)
     ai_provider: str = Field(default="openai", alias="AI_PROVIDER")
     ai_api_key: str = Field(default="", alias="AI_API_KEY")
     ai_model: str = Field(default="gpt-4o-mini", alias="AI_MODEL")

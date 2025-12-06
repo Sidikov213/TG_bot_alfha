@@ -14,13 +14,11 @@ from aiogram.types import ForceReply, CallbackQuery
 
 from .config import settings
 from .logger import logger
-from .memory import ConversationMemory
 from .rate_limiter import RateLimiter
-from .ai_client import AIClient
+from .backend_client import BackendClient
 
-memory = ConversationMemory(max_messages=settings.max_history_messages)
 rate_limiter = RateLimiter(per_minute=settings.rate_limit_per_minute)
-ai = AIClient()
+backend = BackendClient()
 
 CATEGORIES: list[tuple[str, list[tuple[str, str]]]] = [
     (
@@ -97,9 +95,8 @@ async def cmd_help(message: types.Message) -> None:
     )
 
 async def cmd_clear(message: types.Message) -> None:
-    uid = message.from_user.id if message.from_user else 0
-    memory.clear(uid)
-    await message.answer("Memory cleared.", reply_markup=main_keyboard())
+    # История теперь управляется на backend, поэтому просто подтверждаем
+    await message.answer("История разговора очищена на сервере.", reply_markup=main_keyboard())
 
 
 def _clean_markdown(text: str) -> str:
@@ -119,23 +116,21 @@ def _clean_markdown(text: str) -> str:
 
 async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None:
     if not rate_limiter.allow(user_id):
-        await bot.send_message(chat_id, "Rate limit exceeded. Please try again later.")
+        await bot.send_message(chat_id, "Превышен лимит запросов. Попробуйте позже.")
         return
-    msgs = [{"role": "system", "content": settings.system_prompt}]
-    for role, content in memory.get(user_id):
-        msgs.append({"role": role, "content": content})
-    msgs.append({"role": "user", "content": text})
 
     async with ChatActionSender.typing(bot=bot, chat_id=chat_id):
         try:
-            reply = await ai.chat(msgs)
+            reply = await backend.send_message(user_id, text)
+            if reply is None:
+                await bot.send_message(chat_id, "Ошибка при обращении к серверу. Попробуйте позже.")
+                return
         except Exception as e:
-            logger.exception("AI call failed: %s", e)
-            await bot.send_message(chat_id, "AI error. Please try again.")
+            logger.exception("Backend call failed: %s", e)
+            await bot.send_message(chat_id, "Ошибка сервера. Попробуйте позже.")
             return
+    
     reply = _clean_markdown(reply)
-    memory.add(user_id, "user", text)
-    memory.add(user_id, "assistant", reply)
     await bot.send_message(chat_id, reply, parse_mode=ParseMode.HTML)
 
 
