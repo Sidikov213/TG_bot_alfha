@@ -109,8 +109,15 @@ async def cmd_start(message: types.Message) -> None:
         )
         return
     
+    logger.debug("Telegram user from create_or_get: %s", telegram_user)
+    
     # Проверяем, связан ли Telegram пользователь с основным аккаунтом
-    backend_user_id = telegram_user.get("user_id") or telegram_user.get("backend_user_id")
+    # Пробуем разные варианты названий полей
+    backend_user_id = (
+        telegram_user.get("user_id") 
+        or telegram_user.get("backend_user_id")
+        or telegram_user.get("linked_user_id")
+    )
     
     if backend_user_id:
         # Пользователь уже связан с основным аккаунтом
@@ -215,16 +222,37 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
     if not backend_user_id:
         telegram_user = await backend.get_telegram_user(user_id)
         if telegram_user:
-            backend_user_id = telegram_user.get("user_id") or telegram_user.get("backend_user_id")
+            logger.info("Telegram user response: %s", telegram_user)
+            # Пробуем разные варианты названий полей
+            backend_user_id = (
+                telegram_user.get("user_id") 
+                or telegram_user.get("backend_user_id")
+                or telegram_user.get("linked_user_id")
+            )
+            logger.info("Extracted backend_user_id: %s from telegram_user: %s", backend_user_id, telegram_user)
+            
             # Если нашли в backend, сохраняем в локальное хранилище
             if backend_user_id:
                 token = user_storage.get_token(user_id)
-                if token:
-                    user_storage.set(
-                        telegram_user_id=user_id,
-                        backend_user_id=backend_user_id,
-                        telegram_username=telegram_user.get("telegram_username")
-                    )
+                user_storage.set(
+                    telegram_user_id=user_id,
+                    backend_user_id=backend_user_id,
+                    token=token,  # Сохраняем токен, если есть
+                    telegram_username=telegram_user.get("telegram_username")
+                )
+            else:
+                # Telegram пользователь существует, но не связан с основным аккаунтом
+                # Пробуем использовать telegram_user_id напрямую для отправки сообщений
+                logger.info("Telegram user %s exists but not linked to backend account, using telegram_user_id directly", user_id)
+                backend_user_id = user_id  # Используем telegram_user_id как user_id
+                # Сохраняем в локальное хранилище для будущих запросов
+                user_storage.set(
+                    telegram_user_id=user_id,
+                    backend_user_id=user_id,  # Временно используем telegram_user_id
+                    telegram_username=telegram_user.get("telegram_username")
+                )
+        else:
+            logger.warning("Telegram user %s not found in backend", user_id)
     
     # Если все еще нет backend_user_id, пользователь не зарегистрирован
     if not backend_user_id:

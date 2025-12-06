@@ -195,7 +195,9 @@ class BackendClient:
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.get(url, headers=self.headers)
                 r.raise_for_status()
-                return r.json()
+                data = r.json()
+                logger.debug("Telegram user response: %s", data)
+                return data
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
