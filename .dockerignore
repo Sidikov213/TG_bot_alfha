@@ -30,6 +30,9 @@ ENV/
 .env
 .env.local
 
+# User storage
+user_storage.json
+
 # Documentation
 *.md
 !README.md

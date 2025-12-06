@@ -19,3 +19,6 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+
+# User storage (contains sensitive user data)
+user_storage.json
