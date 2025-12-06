@@ -196,10 +196,11 @@ class BackendClient:
                 r = await client.get(url, headers=self.headers)
                 r.raise_for_status()
                 data = r.json()
-                logger.debug("Telegram user response: %s", data)
+                logger.info("Telegram user API response for user_id %s: %s", telegram_user_id, data)
                 return data
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
+                logger.info("Telegram user %s not found (404)", telegram_user_id)
                 return None
             logger.error("Backend API error: %s - %s", e.response.status_code, e.response.text)
             return None
