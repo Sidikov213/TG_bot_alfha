@@ -445,18 +445,11 @@ async def _process_text(bot: Bot, chat_id: int, user_id: int, text: str) -> None
                     reply_data.get("conversation_id") 
                     or reply_data.get("conversationId")
                     or reply_data.get("id")
-                    or reply_data.get("conversation_id")
                 )
                 
-                # Конвертируем в int, если это строка
+                # Конвертируем в строку (может быть UUID)
                 if new_conversation_id is not None:
-                    try:
-                        new_conversation_id = int(new_conversation_id)
-                    except (ValueError, TypeError):
-                        logger.warning("Invalid conversation_id format: %s", new_conversation_id)
-                        new_conversation_id = None
-                
-                if new_conversation_id:
+                    new_conversation_id = str(new_conversation_id)
                     logger.info("New conversation_id received: %s", new_conversation_id)
                     user_storage.set_conversation_id(user_id, new_conversation_id)
                 
@@ -541,11 +534,8 @@ async def on_callback(call: CallbackQuery) -> None:
             await call.answer("Новый разговор создан")
             return
         
-        try:
-            conversation_id = int(conv_data)
-        except ValueError:
-            await call.answer("Ошибка: неверный ID разговора", show_alert=True)
-            return
+        # conversation_id может быть UUID строкой
+        conversation_id = str(conv_data)
         
         # Устанавливаем выбранный разговор как текущий
         user_storage.set_conversation_id(telegram_user_id, conversation_id)

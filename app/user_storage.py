@@ -46,7 +46,7 @@ class UserStorage:
         email: Optional[str] = None,
         password: Optional[str] = None,
         telegram_username: Optional[str] = None,
-        conversation_id: Optional[int] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Сохраняет данные пользователя"""
         if telegram_user_id not in self._storage:
@@ -81,13 +81,15 @@ class UserStorage:
         user_data = self.get(telegram_user_id)
         return user_data.get("backend_user_id") if user_data else None
 
-    def get_conversation_id(self, telegram_user_id: int) -> Optional[int]:
-        """Получает текущий conversation_id"""
+    def get_conversation_id(self, telegram_user_id: int) -> Optional[str]:
+        """Получает текущий conversation_id (может быть UUID строкой или числом)"""
         user_data = self.get(telegram_user_id)
-        return user_data.get("conversation_id") if user_data else None
+        conv_id = user_data.get("conversation_id") if user_data else None
+        # Конвертируем в строку, если это число
+        return str(conv_id) if conv_id is not None else None
 
-    def set_conversation_id(self, telegram_user_id: int, conversation_id: Optional[int]) -> None:
-        """Устанавливает текущий conversation_id"""
+    def set_conversation_id(self, telegram_user_id: int, conversation_id: Optional[str]) -> None:
+        """Устанавливает текущий conversation_id (может быть UUID строкой или числом)"""
         self.set(telegram_user_id=telegram_user_id, conversation_id=conversation_id)
 
 

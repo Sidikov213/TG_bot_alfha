@@ -260,23 +260,19 @@ class BackendClient:
             logger.exception("Backend API call failed: %s", e)
             return None
 
-    async def get_conversation_history(self, conversation_id: int) -> Optional[list]:
+    async def get_conversation_history(self, conversation_id: str) -> Optional[list]:
         """
         Получает историю разговора.
         
         Args:
-            conversation_id: ID разговора
+            conversation_id: ID разговора (может быть UUID строкой)
             
         Returns:
             Список сообщений или None в случае ошибки
         """
-        # Убеждаемся, что conversation_id - это число
-        if not isinstance(conversation_id, int):
-            try:
-                conversation_id = int(conversation_id)
-            except (ValueError, TypeError):
-                logger.error("Invalid conversation_id: %s", conversation_id)
-                return None
+        # Убеждаемся, что conversation_id - это строка
+        if not isinstance(conversation_id, str):
+            conversation_id = str(conversation_id)
         
         url = f"{self.base_url}/api/chat/history/{conversation_id}"
         logger.info("Fetching conversation history for conversation_id: %s", conversation_id)
@@ -297,14 +293,14 @@ class BackendClient:
             logger.exception("Backend API call failed: %s", e)
             return None
 
-    async def send_message(self, user_id: int, message: str, conversation_id: Optional[int] = None) -> Optional[Dict]:
+    async def send_message(self, user_id: int, message: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """
         Отправляет сообщение на backend API и возвращает ответ.
         
         Args:
             user_id: ID пользователя (backend user_id)
             message: Текст сообщения пользователя
-            conversation_id: ID разговора (опционально, для продолжения существующего разговора)
+            conversation_id: ID разговора (опционально, может быть UUID строкой)
             
         Returns:
             Словарь с ответом (может содержать conversation_id) или None в случае ошибки
@@ -315,13 +311,9 @@ class BackendClient:
             "message": message,
         }
         if conversation_id is not None:
-            # Убеждаемся, что conversation_id - это число
-            try:
-                conv_id = int(conversation_id)
-                payload["conversation_id"] = conv_id
-                logger.info("Sending message with conversation_id: %s", conv_id)
-            except (ValueError, TypeError):
-                logger.warning("Invalid conversation_id format: %s, sending without it", conversation_id)
+            # Убеждаемся, что conversation_id - это строка (может быть UUID)
+            payload["conversation_id"] = str(conversation_id)
+            logger.info("Sending message with conversation_id: %s", conversation_id)
         
         try:
             async with httpx.AsyncClient(timeout=60) as client:
